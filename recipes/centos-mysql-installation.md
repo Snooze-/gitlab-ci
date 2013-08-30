@@ -1,58 +1,72 @@
+# WARING THIS DOCUMENT IS NOT COMPLETE YET AND FOLLOWING THE STEPS MIGHT GIVE YOU AN IDEA ON HOW TO GET THIS WORKING, BUT IS UNLIKELY TO RESULT IN A WORKING SYSTEM.
+
 # Requirements:
 
-* GitLab 5.3+
+* CentOS 6.4 Mimial Install
 
 # Setup: 
 
 ## 1. Packages / Dependencies
-
-`sudo` is not installed on Debian by default. Make sure your system is
-up-to-date and install it.
-
-    sudo apt-get update
-    sudo apt-get upgrade
 
 **Note:**
 Vim is an editor that is used here whenever there are files that need to be
 edited by hand. But, you can use any editor you like instead.
 
     # Install vim
-    sudo apt-get install -y vim
+    sudo yum -y install vim-enhanced
+
+### Add the EPEL repository
+
+[EPEL][] is a volunteer-based community effort from the Fedora project to create
+a repository of high-quality add-on packages that complement the Fedora-based
+Red Hat Enterprise Linux (RHEL) and its compatible spinoffs, such as CentOS and Scientific Linux.
+
+As part of the Fedora packaging community, EPEL packages are 100% free/libre open source software (FLOSS).
+
+Install the `epel-release-6-8.noarch` package, which will enable EPEL repository on your system:
+
+    yum install https://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
 
 Install the required packages:
 
-    sudo apt-get install -y wget curl gcc checkinstall libxml2-dev libxslt-dev libcurl4-openssl-dev libreadline6-dev libc6-dev libssl-dev libmysql++-dev make build-essential zlib1g-dev openssh-server git-core libyaml-dev postfix libpq-dev libicu-dev
-    sudo apt-get install redis-server 
+    sudo yum -y update
+    sudo yum -y groupinstall 'Development Tools'
+    sudo yum -y install crontabs, curl, curl-devel, gcc, git, glibc-devel, libicu-devel, libxml2-devel, libxslt-devel, libyaml-devel, mysql-devel, mysql-server, openssh-server, openssl-devel, postfix, readline-devel, redis, wget
 
 # 2. Ruby
 
 Download Ruby and compile it:
 
     mkdir /tmp/ruby && cd /tmp/ruby
-    curl --progress http://ftp.ruby-lang.org/pub/ruby/1.9/ruby-1.9.3-p392.tar.gz | tar xz
-    cd ruby-1.9.3-p392
+    curl --progress http://ftp.ruby-lang.org/pub/ruby/1.9/ruby-1.9.3-p448.tar.gz | tar xz
+    cd ruby-1.9.3-p448/
     ./configure
     make
+    make test
     sudo make install
 
 Install the Bundler Gem:
 
     sudo gem install bundler --no-ri --no-rdoc
 
-
 ## 3. GitLab CI user:
 
-    sudo adduser --disabled-login --gecos 'GitLab CI' gitlab_ci
+    sudo adduser --system --shell /bin/bash --comment 'GitLab CI' --create-home --home-dir /home/gitlab_ci/ gitlab_ci
 
+We do NOT set the password so this user cannot login.
 
 ## 4. Prepare the database
 
-You can use either MySQL or PostgreSQL.
+Although GitLab CI supporst PostgreSQL, this document has only been tested with MySQL. If you would like to try using PostgreSQL you can check the official installation document.
 
 ### MySQL
 
-    # Install the database packages
-    sudo apt-get install -y mysql-server mysql-client libmysqlclient-dev
+    # enable the `mysqld` service to start on boot:
+    sudo chkconfig mysqld on
+    sudo service mysqld start
+
+    # Secure MySQL by entering a root password and say "Yes" to all questions:
+    /usr/bin/mysql_secure_installation
 
     # Login to MySQL
     $ mysql -u root -p
@@ -65,29 +79,12 @@ You can use either MySQL or PostgreSQL.
 
     # Grant proper permissions to the MySQL User
     mysql> GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER ON `gitlab_ci_production`.* TO 'gitlab_ci'@'localhost';
-    
+
+    # Flush MySQL privileges
+    mysql> FLUSH PRIVILEGES
+
     # Logout MYSQL
     mysql> exit;
-    
-### PostgreSQL
-
-    # Install the database packages
-    sudo apt-get install -y postgresql-9.1 libpq-dev
-
-    # Login to PostgreSQL
-    sudo -u postgres psql -d template1
-
-    # Create a user for GitLab. (change $password to a real password)
-    template1=# CREATE USER gitlab_ci WITH PASSWORD '$password';
-
-    # Create the GitLab production database & grant all privileges on database
-    template1=# CREATE DATABASE gitlab_ci_production OWNER gitlab_ci;
-
-    # Quit the database session
-    template1=# \q
-
-    # Try connecting to the new database with the new user
-    sudo -u gitlab_ci -H psql -d gitlab_ci_production
 
 ## 5. Get code 
 
@@ -116,30 +113,24 @@ You can use either MySQL or PostgreSQL.
 ### Install gems
  
     # For MySQL (note, the option says "without ... postgres")
-    sudo -u gitlab_ci -H bundle install --without development test postgres --deployment
-
-    # Or for PostgreSQL (note, the option says "without ... mysql")
-    sudo -u gitlab_ci -H bundle install --without development test mysql --deployment
+    su - gitlab_ci
+    cd gitlab-ci/
+    bundle install --without development test postgres --deployment
 
 ### Setup db
 
     # mysql
-    sudo -u gitlab_ci -H cp config/database.yml.mysql config/database.yml
-
-    # postgres
-    sudo -u gitlab_ci -H cp config/database.yml.postgresql config/database.yml
+    cp config/database.yml.mysql config/database.yml
  
     # Edit user/password
-    sudo -u gitlab_ci -H vim config/database.yml
+    vim config/database.yml
 
     # Setup tables
-    sudo -u gitlab_ci -H bundle exec rake db:setup RAILS_ENV=production
-    
+    bundle exec rake db:setup RAILS_ENV=production
 
     # Setup schedules
-    #
-    sudo -u gitlab_ci -H bundle exec whenever -w RAILS_ENV=production
-   
+    bundle exec whenever -w RAILS_ENV=production
+    exit
 
 ## 7. Install Init Script
 
@@ -150,21 +141,17 @@ Download the init script (will be /etc/init.d/gitlab_ci):
 
 Make GitLab start on boot:
 
-    sudo update-rc.d gitlab_ci defaults 21
-
+    sudo chkconfig --level 345 gitlab_ci on
 
 Start your GitLab instance:
 
-    sudo service gitlab_ci start
-    # or
-    sudo /etc/init.d/gitlab_ci restart
-
+    service gitlab_ci restart
 
 # 8. Nginx
 
 
 ## Installation
-    sudo apt-get install nginx
+    sudo yum -y install nginx
 
 ## Site Configuration
 
@@ -180,11 +167,18 @@ Make sure to edit the config file to match your setup:
     # of your host serving GitLab CI
     sudo vim /etc/nginx/sites-enabled/gitlab_ci
 
+Add nginx to the gitlab_ci group and set group permissions on the /home/gitlab_ci directory
+
+    usermod -aG gitlab_ci nginx
+    chmod g+rx /home/gitlab_ci/
+
+## Make GitLab start on boot
+
+    sudo chkconfig --level 345 nginx on
+
 ## Reload configuration
 
-    sudo /etc/init.d/nginx reload
-
-
+    sudo service nginx restart
 
 # 9. Runners
 
